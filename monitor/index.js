@@ -1,7 +1,9 @@
 const core = require('@actions/core');
 const {DefaultArtifactClient} = require('@actions/artifact')
+const { SarifBuilder, SarifRunBuilder, SarifResultBuilder, SarifRuleBuilder } = require('node-sarif-builder')
 const crypto = require("crypto");
 const fs = require('fs');
+const { config } = require('process');
 
 async function run() {
   try {
@@ -18,6 +20,9 @@ async function run() {
     }
     if (!config.hasOwnProperty('debug')) {
       config['debug'] = false;
+    }
+    if (!config.hasOwnProperty('upload_sarif')) {
+      config['upload_sarif'] = false;
     }
 
     if (!config.enabled)
@@ -110,6 +115,21 @@ async function run() {
           tempDirectory,
           { continueOnError: false }
         );
+      }
+      if (config.upload_sarif) {
+        // create sarif file from Object.fromEntries(permissions)
+        const sarifBuilder = new SarifBuilder()
+        const SarifRunBuilder = new SarifRunBuilder().initSimple({
+          toolDriverName: 'github-token-permissions',
+          toolDriverVersion: '1.0.2-beta2',
+          url: 'https://github.com/GitHubSecurityLab/actions-permissions',
+        })
+
+        const SarifRuleBuilder = new SarifRuleBuilder().initSimple({
+          ruleId: 'github-token-permissions',
+          shortDescriptionText: ''
+
+        // use octokit? to call the upload-sarif action
       }
     }
     else {
