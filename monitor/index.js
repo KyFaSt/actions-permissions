@@ -160,11 +160,13 @@ async function run() {
         if (permissions.size != 0) {
           for (const [kind, perm] of permissions) {
             const resultText = `The required minimum permission for ${kind} is ${perm}\n`;
+            // for local testing
+            const GITHUB_WORKFLOW_REF = "octocat/hello-world/.github/workflows/my-workflow.yml@refs/heads/my_branch"
             const sarifResultBuilder = new SarifResultBuilder().initSimple({
               level: "error",
               messageText: resultText,
               ruleId: "actions/missing-workflow-permissions",
-              fileUri: "github.com",
+              fileUri: GITHUB_WORKFLOW_REF,
               startLine: 1,
               startColumn: 1,
               endLine: 1,
@@ -178,6 +180,17 @@ async function run() {
         console.log(sarifBuilder.log);
         const sarif = sarifBuilder.buildSarifJsonString({ indent: false})
         console.log(sarif);
+        // use artifact client to upload the sarif file to ../results directory relative to the running action
+        const tempDirectory = process.env['RUNNER_TEMP'];
+        fs.writeFileSync(`${tempDirectory}/results.sarif`, sarif);
+        await new DefaultArtifactClient().uploadArtifact(
+          `${results.sarif}`,
+          [`${tempDirectory}/permissions`],
+          tempDirectory,
+          { continueOnError: false }
+        );
+        // use octokit to upload the sarif file
+        // use artifact client to delete the sarif file
       };
     }
     else {
