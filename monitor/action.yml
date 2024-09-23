@@ -11,7 +11,7 @@ inputs:
   debug:
     description: 'Enable debug logging'
     required: false
-    default: false
+    default: "true"
 
 runs:
   using: 'node20'

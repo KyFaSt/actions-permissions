@@ -2,6 +2,7 @@ const core = require('@actions/core');
 const {DefaultArtifactClient} = require('@actions/artifact')
 const crypto = require("crypto");
 const fs = require('fs');
+const { SarifBuilder, SarifRunBuilder, SarifResultBuilder, SarifRuleBuilder } = require('node-sarif-builder');
 
 async function run() {
   try {
@@ -11,7 +12,10 @@ async function run() {
       config = JSON.parse(configString);
     }
     if (!config.hasOwnProperty('create_artifact')) {
-      config['create_artifact'] = true;
+      config['create_artifact'] = false;
+    }
+    if (!config.hasOwnProperty('create_sarif')) {
+      config['create_sarif'] = true;
     }
     if (!config.hasOwnProperty('enabled')) {
       config['enabled'] = true;
@@ -36,7 +40,7 @@ async function run() {
       hosts.add(process.env.ACTIONS_ID_TOKEN_REQUEST_URL.split('/')[2].toLowerCase());
     }
 
-    if (!!core.getState('isPost')) {
+    if (true) {
 
       let rootDir = '';
       if (process.env.RUNNER_OS === 'Linux') {
@@ -51,7 +55,8 @@ async function run() {
         core.info(fs.readFileSync(debugLog, 'utf8'));
       }
 
-      const data = fs.readFileSync(`${rootDir}/out.txt`, 'utf8');
+      //const data = fs.readFileSync(`${rootDir}/out.txt`, 'utf8');
+
       if (debug)
         console.log(`logged: ${data}`);
 
@@ -61,7 +66,26 @@ async function run() {
         process.exit(1);
       }
 
-      const results = JSON.parse(`[${data.trim().replace(/\r?\n|\r/g, ',')}]`);
+      //const results = JSON.parse(`[${data.trim().replace(/\r?\n|\r/g, ',')}]`);
+      const results =       [
+        {
+          "host": "api.github.com",
+          "permissions": [
+            { "issues": "write" }
+          ],
+          "method": "POST",
+          "path": "/repos/octocat/hello-world/issues"
+        },
+        {
+          "host": "api.github.com",
+          "permissions": [
+            { "repos": "read" }
+          ],
+          "method": "GET",
+          "path": "/orgs/cat-org/repos/"
+        }
+      ];
+
 
       let permissions = new Map();
       for (const result of results) {
@@ -111,6 +135,50 @@ async function run() {
           { continueOnError: false }
         );
       }
+
+      if (config.create_sarif) {
+        const sarifBuilder = new SarifBuilder();
+        const sarifRunBuilder = new SarifRunBuilder({
+          tool: {
+            driver: {
+              name: "actions-permissions-monitor",
+              version: "1.0.2",
+              rules: [],
+              informationUri: "https://github.com/GitHubSecurityLab/actions-permissions/"
+            }
+          }
+        });
+        const sarifRuleBuilder = new SarifRuleBuilder().initSimple({
+          //should this be the codeQL rule id for minimum permissions?
+          shortDescriptionText: "define minimum permissions",
+          ruleId: "actions/missing-workflow-permissions",
+          fullDescriptionText: "This workflow file does not define any permissions, which means it will run with the default permissions. This may be too permissive, and you may want to define a minimum set of permissions to limit the actions that can be taken by this workflow.",
+          helpUri: "https://github.com/GitHubSecurityLab/actions-permissions/"
+          });
+        sarifRuleBuilder.rule.help = {text: "Use the recommended permissions listed here for this workflow."};
+        sarifRunBuilder.addRule(sarifRuleBuilder);
+        if (permissions.size != 0) {
+          for (const [kind, perm] of permissions) {
+            const resultText = `The required minimum permission for ${kind} is ${perm}\n`;
+            const sarifResultBuilder = new SarifResultBuilder().initSimple({
+              level: "error",
+              messageText: resultText,
+              ruleId: "actions/missing-workflow-permissions",
+              fileUri: "github.com",
+              startLine: 1,
+              startColumn: 1,
+              endLine: 1,
+              endColumn: 1
+            });
+            sarifRunBuilder.addResult(sarifResultBuilder);
+          }
+        }
+
+        sarifBuilder.addRun(sarifRunBuilder);
+        console.log(sarifBuilder.log);
+        const sarif = sarifBuilder.buildSarifJsonString({ indent: false})
+        console.log(sarif);
+      };
     }
     else {
       core.saveState('isPost', true)
