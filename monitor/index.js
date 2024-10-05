@@ -19,6 +19,9 @@ async function run() {
     if (!config.hasOwnProperty('debug')) {
       config['debug'] = false;
     }
+    if (!config.hasOwnProperty('create_sarif')) {
+      config['create_sarif'] = true;
+    }
 
     if (!config.enabled)
       return;
@@ -111,6 +114,56 @@ async function run() {
           { continueOnError: false }
         );
       }
+      if (config.create_sarif) {
+        const sarifBuilder = new SarifBuilder();
+        const sarifRunBuilder = new SarifRunBuilder({
+          tool: {
+            driver: {
+              name: "actions-permissions-monitor",
+              version: "1.0.2",
+              rules: [],
+              informationUri: "https://github.com/GitHubSecurityLab/actions-permissions/"
+            }
+          }
+        });
+        const sarifRuleBuilder = new SarifRuleBuilder().initSimple({
+          //should this be the codeQL rule id for minimum permissions?
+          shortDescriptionText: "define minimum permissions",
+          ruleId: "actions/missing-workflow-permissions",
+          fullDescriptionText: "This workflow file does not define any permissions, which means it will run with the default permissions. This may be too permissive, and you may want to define a minimum set of permissions to limit the actions that can be taken by this workflow.",
+          helpUri: "https://github.com/GitHubSecurityLab/actions-permissions/"
+          });
+        sarifRuleBuilder.rule.help = {text: "Use the recommended permissions listed here for this workflow."};
+        sarifRunBuilder.addRule(sarifRuleBuilder);
+        if (permissions.size != 0) {
+          for (const [kind, perm] of permissions) {
+            const resultText = `The required minimum permission for ${kind} is ${perm}\n`;
+            // for local testing
+            const GITHUB_WORKFLOW_REF = "octocat/hello-world/.github/workflows/my-workflow.yml@refs/heads/my_branch"
+            const sarifResultBuilder = new SarifResultBuilder().initSimple({
+              level: "error",
+              messageText: resultText,
+              ruleId: "actions/missing-workflow-permissions",
+              fileUri: GITHUB_WORKFLOW_REF,
+              startLine: 1,
+              startColumn: 1,
+              endLine: 1,
+              endColumn: 1
+            });
+            sarifRunBuilder.addResult(sarifResultBuilder);
+          }
+        }
+
+        sarifBuilder.addRun(sarifRunBuilder);
+        console.log(sarifBuilder.log);
+        const sarif = sarifBuilder.buildSarifJsonString({ indent: false})
+        console.log(sarif);
+        // I'm not sure this is actually correct
+        const tempDirectory = process.env['RUNNER_TEMP'];
+        const sarifFilePath = path.join(tempDirectory, 'results.sarif')
+        fs.writeFileSync(sarifFilePath, sarif);
+        core.setOutput('sarif', sarifFilePath);
+      };
     }
     else {
       core.saveState('isPost', true)
