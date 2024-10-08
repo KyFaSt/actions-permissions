@@ -2,6 +2,7 @@ const core = require('@actions/core');
 const {DefaultArtifactClient} = require('@actions/artifact')
 const crypto = require("crypto");
 const fs = require('fs');
+const { SarifBuilder, SarifRunBuilder, SarifResultBuilder, SarifRuleBuilder } = require('node-sarif-builder');
 
 async function run() {
   try {
@@ -11,7 +12,7 @@ async function run() {
       config = JSON.parse(configString);
     }
     if (!config.hasOwnProperty('create_artifact')) {
-      config['create_artifact'] = true;
+      config['create_artifact'] = false;
     }
     if (!config.hasOwnProperty('enabled')) {
       config['enabled'] = true;
@@ -33,38 +34,59 @@ async function run() {
     }
 
     const hosts = new Set();
+    process.env.GITHUB_API_URL = process.env.GITHUB_API_URL || 'https://api.github.com';
+    process.env.GITHUB_SERVER_URL = process.env.GITHUB_SERVER_URL || 'https://github.com';
     hosts.add(process.env.GITHUB_SERVER_URL.split('/')[2].toLowerCase());
     hosts.add(process.env.GITHUB_API_URL.split('/')[2].toLowerCase());
     if (process.env.ACTIONS_ID_TOKEN_REQUEST_URL) {
       hosts.add(process.env.ACTIONS_ID_TOKEN_REQUEST_URL.split('/')[2].toLowerCase());
     }
 
-    if (!!core.getState('isPost')) {
+    //if (!!core.getState('isPost')) {
+    if (true) {
 
-      let rootDir = '';
-      if (process.env.RUNNER_OS === 'Linux') {
-        rootDir = '/home/mitmproxyuser';
-      } else if (process.env.RUNNER_OS === 'macOS') {
-        rootDir = '/Users/mitmproxyuser';
+      // let rootDir = '';
+      // if (process.env.RUNNER_OS === 'Linux') {
+      //   rootDir = '/home/mitmproxyuser';
+      // } else if (process.env.RUNNER_OS === 'macOS') {
+      //   rootDir = '/Users/mitmproxyuser';
+      // }
+
+      // const debugLog = `${rootDir}/debug.log`;
+      // if (fs.existsSync(debugLog)) {
+      //   // using core.info instead of core.debug to print even if the runner itself doesn't run in debug mode
+      //   core.info(fs.readFileSync(debugLog, 'utf8'));
+      // }
+
+      // const data = fs.readFileSync(`${rootDir}/out.txt`, 'utf8');
+      // if (debug)
+      //   console.log(`logged: ${data}`);
+
+      // const errorLog = `${rootDir}/error.log`;
+      // if (fs.existsSync(errorLog)) {
+      //   core.setFailed(fs.readFileSync(errorLog, 'utf8'));
+      //   process.exit(1);
+      // }
+
+    //  const results = JSON.parse(`[${data.trim().replace(/\r?\n|\r/g, ',')}]`);
+    const results =       [
+      {
+        "host": "api.github.com",
+        "permissions": [
+          { "issues": "write" }
+        ],
+        "method": "POST",
+        "path": "/repos/octocat/hello-world/issues"
+      },
+      {
+        "host": "api.github.com",
+        "permissions": [
+          { "repos": "read" }
+        ],
+        "method": "GET",
+        "path": "/orgs/cat-org/repos/"
       }
-
-      const debugLog = `${rootDir}/debug.log`;
-      if (fs.existsSync(debugLog)) {
-        // using core.info instead of core.debug to print even if the runner itself doesn't run in debug mode
-        core.info(fs.readFileSync(debugLog, 'utf8'));
-      }
-
-      const data = fs.readFileSync(`${rootDir}/out.txt`, 'utf8');
-      if (debug)
-        console.log(`logged: ${data}`);
-
-      const errorLog = `${rootDir}/error.log`;
-      if (fs.existsSync(errorLog)) {
-        core.setFailed(fs.readFileSync(errorLog, 'utf8'));
-        process.exit(1);
-      }
-
-      const results = JSON.parse(`[${data.trim().replace(/\r?\n|\r/g, ',')}]`);
+    ];
 
       let permissions = new Map();
       for (const result of results) {
@@ -99,10 +121,10 @@ async function run() {
         }
       }
 
-      core.summary
-        .addRaw('#### Minimal required permissions:\n')
-        .addCodeBlock(summary, 'yaml')
-        .write();
+      // core.summary
+      //   .addRaw('#### Minimal required permissions:\n')
+      //   .addCodeBlock(summary, 'yaml')
+      //   .write();
 
       if (config.create_artifact) {
         const tempDirectory = process.env['RUNNER_TEMP'];
@@ -140,6 +162,7 @@ async function run() {
             const resultText = `The required minimum permission for ${kind} is ${perm}\n`;
             // for local testing
             const GITHUB_WORKFLOW_REF = "octocat/hello-world/.github/workflows/my-workflow.yml@refs/heads/my_branch"
+           // const GITHUB _WORKFLOW_REF = `${process.env.GITHUB_REPOSITORY}/.github/workflows/${process.env.GITHUB_WORKFLOW}`;
             const sarifResultBuilder = new SarifResultBuilder().initSimple({
               level: "error",
               messageText: resultText,
@@ -158,9 +181,7 @@ async function run() {
         console.log(sarifBuilder.log);
         const sarif = sarifBuilder.buildSarifJsonString({ indent: false})
         console.log(sarif);
-        // I'm not sure this is actually correct
-        const tempDirectory = process.env['RUNNER_TEMP'];
-        const sarifFilePath = path.join(tempDirectory, 'results.sarif')
+        const sarifFilePath = `tmp/results.sarif`;
         fs.writeFileSync(sarifFilePath, sarif);
         core.setOutput('sarif', sarifFilePath);
       };
