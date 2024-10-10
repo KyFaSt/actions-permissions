@@ -2,6 +2,7 @@ const core = require('@actions/core');
 const {DefaultArtifactClient} = require('@actions/artifact')
 const crypto = require("crypto");
 const fs = require('fs');
+const { SarifBuilder, SarifRunBuilder, SarifResultBuilder, SarifRuleBuilder } = require('node-sarif-builder');
 
 async function run() {
   try {
@@ -11,13 +12,16 @@ async function run() {
       config = JSON.parse(configString);
     }
     if (!config.hasOwnProperty('create_artifact')) {
-      config['create_artifact'] = true;
+      config['create_artifact'] = false;
     }
     if (!config.hasOwnProperty('enabled')) {
       config['enabled'] = true;
     }
     if (!config.hasOwnProperty('debug')) {
       config['debug'] = false;
+    }
+    if (!config.hasOwnProperty('create_sarif')) {
+      config['create_sarif'] = false;
     }
 
     if (!config.enabled)
@@ -30,6 +34,8 @@ async function run() {
     }
 
     const hosts = new Set();
+    process.env.GITHUB_API_URL = process.env.GITHUB_API_URL || 'https://api.github.com';
+    process.env.GITHUB_SERVER_URL = process.env.GITHUB_SERVER_URL || 'https://github.com';
     hosts.add(process.env.GITHUB_SERVER_URL.split('/')[2].toLowerCase());
     hosts.add(process.env.GITHUB_API_URL.split('/')[2].toLowerCase());
     if (process.env.ACTIONS_ID_TOKEN_REQUEST_URL) {
@@ -37,7 +43,6 @@ async function run() {
     }
 
     if (!!core.getState('isPost')) {
-
       let rootDir = '';
       if (process.env.RUNNER_OS === 'Linux') {
         rootDir = '/home/mitmproxyuser';
@@ -61,7 +66,7 @@ async function run() {
         process.exit(1);
       }
 
-      const results = JSON.parse(`[${data.trim().replace(/\r?\n|\r/g, ',')}]`);
+     const results = JSON.parse(`[${data.trim().replace(/\r?\n|\r/g, ',')}]`);
 
       let permissions = new Map();
       for (const result of results) {
@@ -111,6 +116,51 @@ async function run() {
           { continueOnError: false }
         );
       }
+      if (config.create_sarif) {
+        const sarifBuilder = new SarifBuilder();
+        const sarifRunBuilder = new SarifRunBuilder({
+          tool: {
+            driver: {
+              name: "actions-permissions-monitor",
+              version: "1.0.2",
+              rules: [],
+              informationUri: "https://github.com/GitHubSecurityLab/actions-permissions/"
+            }
+          }
+        });
+        const sarifRuleBuilder = new SarifRuleBuilder().initSimple({
+          //should this be the codeQL rule id for minimum permissions?
+          shortDescriptionText: "define minimum permissions",
+          ruleId: "actions/missing-workflow-permissions",
+          fullDescriptionText: "This workflow file does not define any permissions, which means it will run with the default permissions. This may be too permissive, and you may want to define a minimum set of permissions to limit the actions that can be taken by this workflow.",
+          helpUri: "https://github.com/GitHubSecurityLab/actions-permissions/"
+          });
+        sarifRuleBuilder.rule.help = {text: "Use the recommended permissions listed here for this workflow."};
+        sarifRunBuilder.addRule(sarifRuleBuilder);
+        if (permissions.size != 0) {
+          for (const [kind, perm] of permissions) {
+            const resultText = `The required minimum permission for ${kind} is ${perm}\n`;
+            const GITHUB_WORKFLOW_REF = `${process.env.GITHUB_REPOSITORY}/.github/workflows/${process.env.GITHUB_WORKFLOW}`;
+            const sarifResultBuilder = new SarifResultBuilder().initSimple({
+              level: "error",
+              messageText: resultText,
+              ruleId: "actions/missing-workflow-permissions",
+              fileUri: GITHUB_WORKFLOW_REF,
+              startLine: 1,
+              startColumn: 1,
+              endLine: 1,
+              endColumn: 1
+            });
+            sarifRunBuilder.addResult(sarifResultBuilder);
+          }
+        }
+
+        sarifBuilder.addRun(sarifRunBuilder);
+        const sarif = sarifBuilder.buildSarifJsonString({ indent: false})
+        const sarifFilePath = `tmp/results.sarif`;
+        fs.writeFileSync(sarifFilePath, sarif);
+        core.setOutput('sarif', sarifFilePath);
+      };
     }
     else {
       core.saveState('isPost', true)
