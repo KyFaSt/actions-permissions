@@ -1,0 +1,26 @@
+name: 'GitHub Actions Permissions Alert'
+description: 'An action to generate a codescanning alert containing the minimal permissions required for a GitHub Action'
+inputs:
+  token:
+    description: 'The temporary repository token to monitor'
+    required: false
+    default: ${{ github.token }}
+runs:
+  using: "composite"
+  steps:
+    - name: Create Sarif
+    # pin to sha
+      uses: actions-permissions/monitor@v1
+      id: monitor
+      with:
+        token: ${{ github.token }}
+        config: '{"create_sarif": true"}'
+    - name: Upload Sarif
+      uses: github/codeql-action/upload-sarif
+      with:
+        sarif_file: ${{ steps.monitor.outputs.sarif }}
+    - name: Clean up Sarif
+      run: 'dist/index.js'
+      with:
+        sarif_file: ${{ steps.monitor.outputs.sarif }}
+      shell: 'node20'
